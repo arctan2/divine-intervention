@@ -66,12 +66,29 @@ final class Peeker {
         rightImage = mirrored(image)
     }
 
+    /// An edge is usable only if nothing lies beyond it — otherwise the "hidden"
+    /// part of the window would land on the neighbouring monitor instead of
+    /// sliding off into empty space. On a two-monitor setup this means the left
+    /// screen peeks from its left and the right screen from its right.
+    private func exposedCandidates() -> [(NSScreen, Edge)] {
+        var result: [(NSScreen, Edge)] = []
+        for screen in NSScreen.screens {
+            for edge in Edge.allCases {
+                let probeX = edge == .left ? screen.frame.minX - 5 : screen.frame.maxX + 5
+                let probe = CGRect(x: probeX, y: screen.frame.minY, width: 1, height: screen.frame.height)
+                let blocked = NSScreen.screens.contains { $0 !== screen && $0.frame.intersects(probe) }
+                if !blocked { result.append((screen, edge)) }
+            }
+        }
+        return result
+    }
+
     func peek() {
         guard !isPeeking else { return }
-        guard let screen = NSScreen.screens.randomElement() ?? NSScreen.main else { return }
+        let candidates = exposedCandidates()
+        guard let (screen, edge) = candidates.randomElement() else { return }
         isPeeking = true
 
-        let edge = Edge.allCases.randomElement()!
         let image = edge == .left ? leftImage : rightImage
         let visible = screen.visibleFrame
 
@@ -164,9 +181,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         peeker = Peeker(image: image)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "✝︎"
-        rebuildMenu()
+        // Stealth by default: no menu bar icon. Set DI_SHOW_ICON=1 to show it
+        // (handy for testing — it gives you Pause, intervals, and Quit).
+        if ProcessInfo.processInfo.environment["DI_SHOW_ICON"] == "1" {
+            statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            statusItem.button?.title = "✝︎"
+            rebuildMenu()
+        }
         scheduleNext()
     }
 
@@ -181,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildMenu() {
+        guard statusItem != nil else { return }
         let menu = NSMenu()
         menu.addItem(withTitle: "Peek Now", action: #selector(peekNow), keyEquivalent: "p").target = self
         let pauseItem = menu.addItem(withTitle: paused ? "Resume" : "Pause",
